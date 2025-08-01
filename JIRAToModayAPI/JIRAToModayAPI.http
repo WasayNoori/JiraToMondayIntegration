@@ -1,0 +1,6 @@
+@JIRAToModayAPI_HostAddress = http://localhost:5081
+
+GET {{JIRAToModayAPI_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
