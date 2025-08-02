@@ -27,6 +27,45 @@ namespace JIRAToModayAPI.Models
 
         [JsonPropertyName("updated")]
         public string Updated { get; set; } = string.Empty;
+
+        [JsonPropertyName("attachment")]
+        public List<JiraAttachment> Attachments { get; set; } = new List<JiraAttachment>();
+    }
+
+    public class JiraAttachment
+    {
+        [JsonPropertyName("id")]
+        public string Id { get; set; } = string.Empty;
+
+        [JsonPropertyName("filename")]
+        public string Filename { get; set; } = string.Empty;
+
+        [JsonPropertyName("size")]
+        public long Size { get; set; }
+
+        [JsonPropertyName("mimeType")]
+        public string MimeType { get; set; } = string.Empty;
+
+        [JsonPropertyName("content")]
+        public string Content { get; set; } = string.Empty;
+
+        [JsonPropertyName("created")]
+        public string Created { get; set; } = string.Empty;
+
+        [JsonPropertyName("author")]
+        public JiraUser Author { get; set; } = new JiraUser();
+    }
+
+    public class JiraUser
+    {
+        [JsonPropertyName("accountId")]
+        public string AccountId { get; set; } = string.Empty;
+
+        [JsonPropertyName("displayName")]
+        public string DisplayName { get; set; } = string.Empty;
+
+        [JsonPropertyName("emailAddress")]
+        public string EmailAddress { get; set; } = string.Empty;
     }
 
     public class JiraSearchResponse

@@ -551,7 +551,7 @@ namespace JIRAToModayAPI.Controllers
                     jql = jql,
                     maxResults = maxResults,
                     fields = new[] { 
-                        "summary", "description", "created", "updated"
+                        "summary", "description", "created", "updated", "attachment"
                     }
                 };
 
