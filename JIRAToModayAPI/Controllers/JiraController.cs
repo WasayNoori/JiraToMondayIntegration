@@ -5,6 +5,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using JIRAToModayAPI.Models;
 
 namespace JIRAToModayAPI.Controllers
 {
@@ -12,7 +13,7 @@ namespace JIRAToModayAPI.Controllers
     {
         public string Jql { get; set; } = "project = \"VPI\"";
         public int MaxResults { get; set; } = 50;
-        public string[] Fields { get; set; } = new[] { "summary", "status", "assignee", "project", "created", "updated" };
+        public string[] Fields { get; set; } = new[] { "summary", "status", "assignee", "project", "created", "updated", "description" };
     }
 
     [Route("api/[controller]")]
@@ -30,6 +31,70 @@ namespace JIRAToModayAPI.Controllers
             _jiraUrl = configuration["jiraurl"] ?? throw new InvalidOperationException("Jira URL not found in configuration");
             _jiraUsername = configuration["jirausername"] ?? throw new InvalidOperationException("Jira username not found in configuration");
             _jiraToken = configuration["jiratoken"] ?? throw new InvalidOperationException("Jira token not found in configuration");
+        }
+
+        private string ProcessJiraResponse(string response)
+        {
+            // Parse the JSON, process only description fields, then serialize back
+            try
+            {
+                using var document = JsonDocument.Parse(response);
+                var processedJson = ProcessJsonElement(document.RootElement);
+                return JsonSerializer.Serialize(processedJson, new JsonSerializerOptions { WriteIndented = true });
+            }
+            catch
+            {
+                // If JSON parsing fails, return original response
+                return response;
+            }
+        }
+
+        private object ProcessJsonElement(JsonElement element)
+        {
+            switch (element.ValueKind)
+            {
+                case JsonValueKind.Object:
+                    var obj = new Dictionary<string, object>();
+                    foreach (var property in element.EnumerateObject())
+                    {
+                        if (property.Name == "description" && property.Value.ValueKind == JsonValueKind.String)
+                        {
+                            // Convert \n to actual newlines only in description fields
+                            obj[property.Name] = property.Value.GetString().Replace("\\n", "\n");
+                        }
+                        else
+                        {
+                            obj[property.Name] = ProcessJsonElement(property.Value);
+                        }
+                    }
+                    return obj;
+
+                case JsonValueKind.Array:
+                    var array = new List<object>();
+                    foreach (var item in element.EnumerateArray())
+                    {
+                        array.Add(ProcessJsonElement(item));
+                    }
+                    return array;
+
+                case JsonValueKind.String:
+                    return element.GetString();
+
+                case JsonValueKind.Number:
+                    return element.GetDecimal();
+
+                case JsonValueKind.True:
+                    return true;
+
+                case JsonValueKind.False:
+                    return false;
+
+                case JsonValueKind.Null:
+                    return null;
+
+                default:
+                    return element.GetRawText();
+            }
         }
 
 
@@ -57,7 +122,8 @@ namespace JIRAToModayAPI.Controllers
                         if (response.IsSuccessStatusCode)
                         {
                             var result = await response.Content.ReadAsStringAsync();
-                            return Content(result, "application/json");
+                            var processedResult = ProcessJiraResponse(result);
+                            return Content(processedResult, "application/json");
                         }
                     }
                     catch (Exception ex)
@@ -88,7 +154,7 @@ namespace JIRAToModayAPI.Controllers
                 {
                     Jql = "project = \"VPI\"",
                     MaxResults = 50,
-                    Fields = new[] { "summary", "status", "assignee", "project", "created", "updated" }
+                    Fields = new[] { "summary", "status", "assignee", "project", "created", "updated", "description" }
                 };
 
                 var apiVersions = new[] { "2", "3" };
@@ -106,7 +172,8 @@ namespace JIRAToModayAPI.Controllers
                         if (response.IsSuccessStatusCode)
                         {
                             var result = await response.Content.ReadAsStringAsync();
-                            return Content(result, "application/json");
+                            var processedResult = ProcessJiraResponse(result);
+                            return Content(processedResult, "application/json");
                         }
                     }
                     catch (Exception ex)
@@ -143,7 +210,7 @@ namespace JIRAToModayAPI.Controllers
                 {
                     jql = jql,
                     maxResults = maxResults,
-                    fields = new[] { "summary", "status", "assignee", "project", "created", "updated", "priority", "issuetype" }
+                    fields = new[] { "summary", "status", "assignee", "project", "created", "updated", "priority", "issuetype", "description" }
                 };
 
                 var apiVersions = new[] { "2", "3" };
@@ -161,7 +228,8 @@ namespace JIRAToModayAPI.Controllers
                         if (response.IsSuccessStatusCode)
                         {
                             var result = await response.Content.ReadAsStringAsync();
-                            return Content(result, "application/json");
+                            var processedResult = ProcessJiraResponse(result);
+                            return Content(processedResult, "application/json");
                         }
                     }
                     catch (Exception ex)
@@ -268,6 +336,267 @@ namespace JIRAToModayAPI.Controllers
             }
         }
 
+        [HttpGet("issues/all-fields")]
+        public async Task<IActionResult> GetJiraIssuesWithAllFields(string projectKey = null, string assignee = null, int maxResults = 50)
+        {
+            try
+            {
+                var client = new HttpClient();
+                var authToken = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{_jiraUsername}:{_jiraToken}"));
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", authToken);
+
+                // Build JQL query
+                var jql = "project = \"VPI\"";
+                if (!string.IsNullOrEmpty(assignee))
+                {
+                    jql += $" AND assignee = \"{assignee}\"";
+                }
+
+                // Request comprehensive set of fields including description
+                var searchBody = new
+                {
+                    jql = jql,
+                    maxResults = maxResults,
+                    fields = new[] { 
+                        "summary", "status", "assignee", "project", "created", "updated", 
+                        "priority", "issuetype", "description", "labels", "components", 
+                        "fixVersions", "reporter", "resolution"
+                    }
+                };
+
+                var apiVersions = new[] { "2", "3" };
+                
+                foreach (var version in apiVersions)
+                {
+                    try
+                    {
+                        var url = $"{_jiraUrl}/rest/api/{version}/search";
+                        var json = JsonSerializer.Serialize(searchBody);
+                        var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                        var response = await client.PostAsync(url, content);
+                        
+                        if (response.IsSuccessStatusCode)
+                        {
+                            var result = await response.Content.ReadAsStringAsync();
+                            var processedResult = ProcessJiraResponse(result);
+                            return Content(processedResult, "application/json");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Continue to next version
+                    }
+                }
+                
+                return StatusCode(500, "Failed to retrieve issues from both API versions");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { Error = ex.Message });
+            }
+        }
+
+        [HttpGet("issues/with-description")]
+        public async Task<IActionResult> GetJiraIssuesWithDescription(string projectKey = null, string assignee = null, int maxResults = 50)
+        {
+            try
+            {
+                var client = new HttpClient();
+                var authToken = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{_jiraUsername}:{_jiraToken}"));
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", authToken);
+
+                // Build JQL query
+                var jql = "project = \"VPI\"";
+                if (!string.IsNullOrEmpty(assignee))
+                {
+                    jql += $" AND assignee = \"{assignee}\"";
+                }
+
+                // Simple approach - just add description to the working fields
+                var searchBody = new
+                {
+                    jql = jql,
+                    maxResults = maxResults,
+                    fields = new[] { 
+                        "summary", "status", "assignee", "project", "created", "updated", 
+                        "priority", "issuetype", "description"
+                    }
+                };
+
+                var apiVersions = new[] { "2", "3" };
+                
+                foreach (var version in apiVersions)
+                {
+                    try
+                    {
+                        var url = $"{_jiraUrl}/rest/api/{version}/search";
+                        var json = JsonSerializer.Serialize(searchBody);
+                        var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                        var response = await client.PostAsync(url, content);
+                        
+                        if (response.IsSuccessStatusCode)
+                        {
+                            var result = await response.Content.ReadAsStringAsync();
+                            var processedResult = ProcessJiraResponse(result);
+                            return Content(processedResult, "application/json");
+                        }
+                        else
+                        {
+                            var errorContent = await response.Content.ReadAsStringAsync();
+                            Console.WriteLine($"API {version} failed: {response.StatusCode} - {errorContent}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Exception with API {version}: {ex.Message}");
+                        // Continue to next version
+                    }
+                }
+                
+                return StatusCode(500, "Failed to retrieve issues from both API versions");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { Error = ex.Message });
+            }
+        }
+
+        [HttpGet("issues/model")]
+        public async Task<ActionResult<JiraSearchResponse>> GetJiraIssuesModel(string projectKey = null, string assignee = null, int maxResults = 50)
+        {
+            try
+            {
+                var client = new HttpClient();
+                var authToken = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{_jiraUsername}:{_jiraToken}"));
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", authToken);
+
+                // Build JQL query
+                var jql = "project = \"VPI\"";
+                if (!string.IsNullOrEmpty(assignee))
+                {
+                    jql += $" AND assignee = \"{assignee}\"";
+                }
+
+                // Simple approach - just add description to the working fields
+                var searchBody = new
+                {
+                    jql = jql,
+                    maxResults = maxResults,
+                    fields = new[] { 
+                        "summary", "status", "assignee", "project", "created", "updated", 
+                        "priority", "issuetype", "description"
+                    }
+                };
+
+                var apiVersions = new[] { "2", "3" };
+                
+                foreach (var version in apiVersions)
+                {
+                    try
+                    {
+                        var url = $"{_jiraUrl}/rest/api/{version}/search";
+                        var json = JsonSerializer.Serialize(searchBody);
+                        var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                        var response = await client.PostAsync(url, content);
+                        
+                        if (response.IsSuccessStatusCode)
+                        {
+                            var result = await response.Content.ReadAsStringAsync();
+                            var processedResult = ProcessJiraResponse(result);
+                            return Content(processedResult, "application/json");
+                        }
+                        else
+                        {
+                            var errorContent = await response.Content.ReadAsStringAsync();
+                            Console.WriteLine($"API {version} failed: {response.StatusCode} - {errorContent}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Exception with API {version}: {ex.Message}");
+                        // Continue to next version
+                    }
+                }
+                
+                return StatusCode(500, "Failed to retrieve issues from both API versions");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { Error = ex.Message });
+            }
+        }
+
+        [HttpGet("issues/typed")]
+        public async Task<ActionResult<JiraSearchResponse>> GetJiraIssuesTyped(string projectKey = null, string assignee = null, int maxResults = 50)
+        {
+            try
+            {
+                var client = new HttpClient();
+                var authToken = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{_jiraUsername}:{_jiraToken}"));
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", authToken);
+
+                // Build JQL query
+                var jql = "project = \"VPI\"";
+                if (!string.IsNullOrEmpty(assignee))
+                {
+                    jql += $" AND assignee = \"{assignee}\"";
+                }
+
+                // Request only the fields we need for our model
+                var searchBody = new
+                {
+                    jql = jql,
+                    maxResults = maxResults,
+                    fields = new[] { 
+                        "summary", "description", "created", "updated"
+                    }
+                };
+
+                var apiVersions = new[] { "2", "3" };
+                
+                foreach (var version in apiVersions)
+                {
+                    try
+                    {
+                        var url = $"{_jiraUrl}/rest/api/{version}/search";
+                        var json = JsonSerializer.Serialize(searchBody);
+                        var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                        var response = await client.PostAsync(url, content);
+                        
+                        if (response.IsSuccessStatusCode)
+                        {
+                            var result = await response.Content.ReadAsStringAsync();
+                            //var processedResult = ProcessJiraResponse(result);
+                            
+                            // Deserialize the processed JSON into our model
+                            var jiraResponse = JsonSerializer.Deserialize<JiraSearchResponse>(result);
+                            return Ok(jiraResponse);
+                        }
+                        else
+                        {
+                            var errorContent = await response.Content.ReadAsStringAsync();
+                            Console.WriteLine($"API {version} failed: {response.StatusCode} - {errorContent}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Exception with API {version}: {ex.Message}");
+                        // Continue to next version
+                    }
+                }
+                
+                return StatusCode(500, "Failed to retrieve issues from both API versions");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { Error = ex.Message });
+            }
+        }
+
         [HttpGet("issue")]
         public async Task<IActionResult> GetJiraIssue(string issueKey)
         {
@@ -293,7 +622,8 @@ namespace JIRAToModayAPI.Controllers
                     if (response.IsSuccessStatusCode)
                     {
                         var result = await response.Content.ReadAsStringAsync();
-                        return Content(result, "application/json");
+                        var processedResult = ProcessJiraResponse(result);
+                        return Content(processedResult, "application/json");
                     }
                 }
                 
