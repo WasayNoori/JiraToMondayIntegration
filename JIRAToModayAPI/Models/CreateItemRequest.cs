@@ -8,7 +8,8 @@ namespace JIRAToModayAPI.Models
         public long boardId { get; set; }
         public string groupId { get; set; }
         public string itemName { get; set; }
-        
+        public string issueKey{ get; set; }
+        public string issueId { get; set; }
         public Dictionary<string, string> columnValues { get; set; }
         public List<JiraAttachment> attachments { get; set; } = new List<JiraAttachment>();
 

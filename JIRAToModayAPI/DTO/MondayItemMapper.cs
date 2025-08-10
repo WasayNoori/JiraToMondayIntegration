@@ -16,14 +16,18 @@ namespace JIRAToModayAPI.DTO
                 
                 CreateItemRequest request= new CreateItemRequest
                 {
-                    boardId = 9768483898, // Replace with actual board ID
+                    boardId = 6246909093, // Replace with actual board ID
                     groupId = "emailed_items__1", // Replace with actual group ID
-                    
+                    issueKey = issue.Key,
+                    issueId = issue.Id,
                     itemName = issue.Fields.Summary,
                     columnValues = new Dictionary<string, string>
                     {
                       
-                        { "long_text_mktky72c", issue.Fields.Description ?? string.Empty }
+                        { "long_text", issue.Fields.Description ?? string.Empty },
+                        {"text_mktma7yj" ,issue.Id},
+                        {"text_mktm4y2m",issue.Key },
+                        {"status_11","VAR Input" }
                     },
                     attachments = issue.Fields.Attachments.Select(a => new JiraAttachment
                     {

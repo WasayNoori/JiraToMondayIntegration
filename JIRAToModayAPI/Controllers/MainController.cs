@@ -2,6 +2,7 @@
 using JIRAToModayAPI.Models;
 using JIRAToModayAPI.Monday;
 using JIRAToModayAPI.DTO;
+using JIRAToModayAPI.Storage;
 
 namespace JIRAToModayAPI.Controllers
 { 
@@ -11,11 +12,14 @@ namespace JIRAToModayAPI.Controllers
     public class MainController : Controller
     {
         private readonly ILogger<MainController> _logger;
+        private readonly JiraMondayMappingService _mappingService;
+
         private readonly IConfiguration _configuration;
-        public MainController(ILogger<MainController> logger, IConfiguration configuration)
+        public MainController(ILogger<MainController> logger, IConfiguration configuration,JiraMondayMappingService mappingservice)
         {
             _logger = logger;
             _configuration = configuration;
+            _mappingService = mappingservice;
         }
 
         [HttpGet("TransferIssue")]
@@ -45,10 +49,19 @@ namespace JIRAToModayAPI.Controllers
                 
                 foreach (var request in mondayRequests)
                 {
+
+                    //check if this exists already
+                    var existingId = await existingItemId(request.issueId);
+                    if(!string.IsNullOrEmpty(existingId))
+                    {
+                        continue;                    }
+
                     try
                     {
                         var response = await mondayClient.CreateItemAsync(request);
                         var itemId = response.Data.Id;
+                     await  _mappingService.AddMappingAsync(request.issueId, itemId);
+
                         results.Add(new
                         {
                             IssueKey = request.itemName,
@@ -68,15 +81,15 @@ namespace JIRAToModayAPI.Controllers
                                      
                                      // Upload to Monday.com (you'll need to specify the correct column ID)
                                      var fileColumnId = "files"; // Replace with your actual file column ID
-                                     var uploadResult = await mondayClient.UploadFileToMondayAsync(
-                                         itemId, 
-                                         fileColumnId, 
-                                         fileBytes, 
-                                         attachment.Filename, 
-                                         attachment.MimeType
-                                     );
-                                     
-                                     _logger.LogInformation($"Successfully uploaded attachment {attachment.Filename} to Monday item {itemId}");
+                                    var uploadResult = await mondayClient.UploadFileToMondayAsync(
+                                        itemId,
+                                        fileColumnId,
+                                        fileBytes,
+                                        attachment.Filename,
+                                        attachment.MimeType
+                                    );
+
+                                    _logger.LogInformation($"Successfully uploaded attachment {attachment.Filename} to Monday item {itemId}");
                                  }
                                  catch (Exception attachmentEx)
                                  {
@@ -111,7 +124,23 @@ namespace JIRAToModayAPI.Controllers
                          }
          }
 
-         private async Task<byte[]> DownloadJiraAttachmentAsync(string contentUrl)
+     
+        private async Task<string> existingItemId(string jiraId)
+        {
+            // Simulate a Monday ID to add if it's not found
+            var result = await _mappingService.GetMondayItemIdAsync(jiraId);
+            if (!string.IsNullOrEmpty(result))
+            {
+                return result;
+            }
+            else
+            {
+
+               return string.Empty;
+            }
+          
+        }
+        private async Task<byte[]> DownloadJiraAttachmentAsync(string contentUrl)
          {
              try
              {
