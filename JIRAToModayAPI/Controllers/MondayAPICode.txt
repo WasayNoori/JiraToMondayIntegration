@@ -1,0 +1,72 @@
+async function uploadFileToMonday(itemId, columnId, filePath) {
+    // Retrieve the API token from environment variables
+    const apiToken = process.env.MONDAY_API_TOKEN;
+
+    if (!apiToken) {
+        throw new Error("MONDAY_API_TOKEN environment variable is not set.");
+    }
+
+    // Build the GraphQL mutation query (matching the working curl command exactly)
+    const query = `mutation ($file: File!) { add_file_to_column(item_id: ${itemId}, column_id: "${columnId}", file: $file) { id } }`;
+
+    // Read the file as a buffer
+    const fileBuffer = fs.readFileSync(filePath);
+    const fileName = path.basename(filePath);
+
+    // Create FormData using the form-data package
+    const form = new FormData();
+    
+    // Append the query (exactly as in working curl)
+    form.append('query', query);
+    
+    // Append variables (exactly as in working curl)
+    form.append('variables', JSON.stringify({ "file": null }));
+    
+    // Append the map (exactly as in working curl - note the array format)
+    form.append('map', JSON.stringify({ "image": ["variables.file"] }));
+    
+    // Append the file with the variable name 'image' (matching the map)
+    form.append('image', fileBuffer, {
+        filename: fileName,
+        contentType: 'application/octet-stream'
+    });
+
+    // Debug: Log what we're sending
+    console.log('=== DEBUG: Form Data ===');
+    console.log('Query:', query);
+    console.log('Variables:', JSON.stringify({ "file": null }));
+    console.log('Map:', JSON.stringify({ "image": ["variables.file"] }));
+    console.log('File name:', fileName);
+    console.log('File size:', fileBuffer.length);
+    console.log('Headers:', form.getHeaders());
+
+    try {
+        const response = await fetch('https://api.monday.com/v2/file/', {
+            method: 'POST',
+            headers: {
+                'Authorization': apiToken,
+                ...form.getHeaders() // This sets the correct Content-Type with boundary
+            },
+            body: form
+        });
+
+        console.log('=== DEBUG: Response ===');
+        console.log('Status:', response.status);
+        console.log('Status Text:', response.statusText);
+        console.log('Response Headers:', Object.fromEntries(response.headers.entries()));
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.log('=== DEBUG: Error Response ===');
+            console.log('Error Text:', errorText);
+            throw new Error(`Monday.com API error! Status: ${response.status} - ${response.statusText}. Response: ${errorText}`);
+        }
+
+        const data = await response.json();
+        console.log('File uploaded successfully:', data);
+        return data;
+
+    } catch (error) {
+        console.error('Error uploading file to Monday.com:', error);
+        throw error;
+    }
